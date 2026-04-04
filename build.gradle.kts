@@ -3,7 +3,7 @@ plugins {
     `maven-publish`
 }
 
-group = "gg.modl.replay"
+group = "gg.modl.minecraft.replay"
 version = "1.1.0"
 
 java {
