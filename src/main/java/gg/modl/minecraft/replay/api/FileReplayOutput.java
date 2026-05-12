@@ -2,7 +2,10 @@ package gg.modl.minecraft.replay.api;
 
 import lombok.Getter;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.zip.GZIPOutputStream;
 
 public class FileReplayOutput implements ReplayOutput {

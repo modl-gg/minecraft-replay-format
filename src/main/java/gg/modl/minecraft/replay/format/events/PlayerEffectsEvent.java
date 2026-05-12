@@ -7,6 +7,7 @@ import lombok.ToString;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,7 +21,7 @@ public class PlayerEffectsEvent extends ReplayEvent {
     public PlayerEffectsEvent(int timestampDeltaMs, UUID uuid, List<EffectEntry> effects) {
         super(timestampDeltaMs);
         this.uuid = uuid;
-        this.effects = effects;
+        this.effects = effects != null ? Collections.unmodifiableList(new ArrayList<>(effects)) : Collections.emptyList();
     }
 
     public static PlayerEffectsEvent fromList(int timestampDeltaMs, UUID uuid, List<int[]> effectList) {

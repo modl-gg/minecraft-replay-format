@@ -1,19 +1,43 @@
 package gg.modl.minecraft.replay;
 
-import gg.modl.minecraft.replay.api.*;
+import gg.modl.minecraft.replay.api.FileReplayOutput;
+import gg.modl.minecraft.replay.api.RecordingConfig;
+import gg.modl.minecraft.replay.api.ReplayMetadata;
+import gg.modl.minecraft.replay.api.ReplayOutput;
+import gg.modl.minecraft.replay.api.ReplaySession;
 import gg.modl.minecraft.replay.format.ReplayEvent;
 import gg.modl.minecraft.replay.format.ReplayHeader;
-import gg.modl.minecraft.replay.format.events.*;
+import gg.modl.minecraft.replay.format.events.BlockChangeEvent;
+import gg.modl.minecraft.replay.format.events.ChatEvent;
+import gg.modl.minecraft.replay.format.events.EntityMoveEvent;
+import gg.modl.minecraft.replay.format.events.EntityRemoveEvent;
+import gg.modl.minecraft.replay.format.events.EntitySpawnEvent;
+import gg.modl.minecraft.replay.format.events.PlayerMoveEvent;
+import gg.modl.minecraft.replay.format.events.PlayerSpawnEvent;
 import gg.modl.minecraft.replay.util.BlockSnapshot;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReplaySessionTest {
 
@@ -70,6 +94,7 @@ class ReplaySessionTest {
         assertTrue(metadata.getDurationMs() >= 0, "Duration should be non-negative");
         assertEquals(4, metadata.getEventCount());
         assertTrue(metadata.getFileSizeBytes() > 0, "File size should be positive");
+        assertEquals(output.getOutputFile(), metadata.getOutputFile());
 
         // Read back the output file and verify contents
         File outputFile = output.getOutputFile();
@@ -210,6 +235,7 @@ class ReplaySessionTest {
         assertTrue(metadata.getDurationMs() >= 0, "Duration should be non-negative");
         assertEquals(2, metadata.getEventCount());
         assertTrue(metadata.getFileSizeBytes() > 0, "File size should be positive for non-empty recording");
+        assertEquals(output.getOutputFile(), metadata.getOutputFile());
     }
 
     // ── stop throws if not recording ───────────────────────────────────
@@ -228,6 +254,46 @@ class ReplaySessionTest {
         assertEquals(0, metadata.getEventCount());
         assertEquals(0, metadata.getDurationMs());
         assertEquals(0, metadata.getFileSizeBytes());
+    }
+
+    @Test
+    void setInitialSnapshotClosesOutputAndReportsErrorWhenSnapshotWriteFails() {
+        RecordingConfig config = RecordingConfig.builder()
+                .mcVersion("1.21.4")
+                .build();
+        TrackingReplayOutput output = new TrackingReplayOutput(new FailingOutputStream(8, false));
+        ReplaySession session = new ReplaySession(config, output);
+
+        List<BlockSnapshot> snapshot = new ArrayList<>();
+        for (int i = 0; i < 700; i++) {
+            snapshot.add(new BlockSnapshot(i, (short) 64, -20, 1));
+        }
+
+        IOException thrown = assertThrows(IOException.class, () -> session.setInitialSnapshot(snapshot));
+
+        assertNotNull(thrown);
+        assertFalse(session.isRecording());
+        assertTrue(output.stream.closed);
+        assertSame(thrown, output.error);
+    }
+
+    @Test
+    void stopReturnsMetadataAndReportsErrorWhenFinalizationFails() throws IOException {
+        RecordingConfig config = RecordingConfig.builder()
+                .mcVersion("1.21.4")
+                .build();
+        TrackingReplayOutput output = new TrackingReplayOutput(new FailingOutputStream(Integer.MAX_VALUE, true));
+        ReplaySession session = new ReplaySession(config, output);
+
+        session.setInitialSnapshot(Collections.emptyList());
+        session.recordEvent(new BlockChangeEvent(100, 0, (short) 0, 0, 1));
+
+        ReplayMetadata metadata = session.stop();
+
+        assertNotNull(metadata);
+        assertEquals(1, metadata.getEventCount());
+        assertSame(output.stream.closeFailure, output.error);
+        assertFalse(session.isRecording());
     }
 
     // ── addPreRollEvents throws if not recording ───────────────────────
@@ -344,5 +410,59 @@ class ReplaySessionTest {
         assertEquals(30, config.getBufferDurationSeconds());
         assertEquals(600, config.getMaxDurationSeconds());
         assertEquals("1.20.1", config.getMcVersion());
+    }
+
+    private static class TrackingReplayOutput implements ReplayOutput {
+        private final FailingOutputStream stream;
+        private Exception error;
+
+        private TrackingReplayOutput(FailingOutputStream stream) {
+            this.stream = stream;
+        }
+
+        @Override
+        public OutputStream openStream() {
+            return stream;
+        }
+
+        @Override
+        public void onComplete(ReplayMetadata metadata) {
+        }
+
+        @Override
+        public void onError(Exception e) {
+            this.error = e;
+        }
+    }
+
+    private static class FailingOutputStream extends OutputStream {
+        private final int failAfterBytes;
+        private final boolean failOnClose;
+        private int written;
+        private boolean closed;
+
+        private FailingOutputStream(int failAfterBytes, boolean failOnClose) {
+            this.failAfterBytes = failAfterBytes;
+            this.failOnClose = failOnClose;
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            if (written >= failAfterBytes) {
+                throw new IOException("write failed");
+            }
+            written++;
+        }
+
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            if (failOnClose) {
+                closeFailure = new IOException("close failed");
+                throw closeFailure;
+            }
+        }
+
+        private IOException closeFailure;
     }
 }

@@ -6,6 +6,7 @@ import gg.modl.minecraft.replay.format.ReplayHeader;
 import gg.modl.minecraft.replay.util.BlockSnapshot;
 import gg.modl.minecraft.replay.util.FormatConstants;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.List;
@@ -27,22 +28,29 @@ public class ReplaySession {
 
     public void setInitialSnapshot(List<BlockSnapshot> blocks) throws IOException {
         this.startTimeMs = System.currentTimeMillis();
-        this.outputStream = output.openStream();
-        this.writer = new ReplayWriter(outputStream);
+        try {
+            this.outputStream = output.openStream();
+            this.writer = new ReplayWriter(outputStream);
 
-        ReplayHeader header = ReplayHeader.builder()
-                .version(FormatConstants.VERSION)
-                .startTime(startTimeMs)
-                .mcVersion(config.getMcVersion())
-                .targetX(0)
-                .targetY(0)
-                .targetZ(0)
-                .radiusBlocks(config.getRadiusBlocks())
-                .build();
+            ReplayHeader header = ReplayHeader.builder()
+                    .version(FormatConstants.VERSION)
+                    .startTime(startTimeMs)
+                    .mcVersion(config.getMcVersion())
+                    .targetX(0)
+                    .targetY(0)
+                    .targetZ(0)
+                    .radiusBlocks(config.getRadiusBlocks())
+                    .build();
 
-        writer.writeHeader(header);
-        writer.writeSnapshot(blocks);
-        this.recording = true;
+            writer.writeHeader(header);
+            writer.writeSnapshot(blocks);
+            this.recording = true;
+        } catch (IOException e) {
+            recording = false;
+            closeAfterFailedStart(e);
+            output.onError(e);
+            throw e;
+        }
     }
 
     public void addPreRollEvents(List<ReplayEvent> preRoll) throws IOException {
@@ -94,30 +102,49 @@ public class ReplaySession {
         long durationMs = System.currentTimeMillis() - startTimeMs;
         long fileSize = 0;
 
+        File outputFile = null;
+        if (output instanceof FileReplayOutput) {
+            outputFile = ((FileReplayOutput) output).getOutputFile();
+        }
+
         try {
             writer.flush();
             writer.close();
 
-            if (output instanceof FileReplayOutput) {
-                java.io.File file = ((FileReplayOutput) output).getOutputFile();
-                if (file != null) fileSize = file.length();
-            }
+            if (outputFile != null) fileSize = outputFile.length();
 
             ReplayMetadata metadata = ReplayMetadata.builder()
                     .durationMs(durationMs)
                     .eventCount(eventCount)
                     .fileSizeBytes(fileSize)
+                    .outputFile(outputFile)
                     .build();
 
             output.onComplete(metadata);
             return metadata;
         } catch (IOException e) {
             output.onError(e);
+            if (outputFile != null) fileSize = outputFile.length();
             return ReplayMetadata.builder()
                     .durationMs(durationMs)
                     .eventCount(eventCount)
-                    .fileSizeBytes(0)
+                    .fileSizeBytes(fileSize)
+                    .outputFile(outputFile)
                     .build();
+        }
+    }
+
+    private void closeAfterFailedStart(IOException original) {
+        if (writer == null) {
+            return;
+        }
+        try {
+            writer.close();
+        } catch (IOException closeFailure) {
+            original.addSuppressed(closeFailure);
+        } finally {
+            writer = null;
+            outputStream = null;
         }
     }
 }

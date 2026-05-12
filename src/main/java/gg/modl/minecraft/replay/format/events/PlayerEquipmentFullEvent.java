@@ -23,7 +23,7 @@ public class PlayerEquipmentFullEvent extends ReplayEvent {
     public PlayerEquipmentFullEvent(int timestampDeltaMs, UUID uuid, List<SlotEntry> slots) {
         super(timestampDeltaMs);
         this.uuid = uuid;
-        this.slots = slots;
+        this.slots = slots != null ? Collections.unmodifiableList(new ArrayList<>(slots)) : Collections.emptyList();
     }
 
     public static PlayerEquipmentFullEvent fromMap(int timestampDeltaMs, UUID uuid, Map<Integer, String> slotMap) {
@@ -101,7 +101,9 @@ public class PlayerEquipmentFullEvent extends ReplayEvent {
         public SlotEntry(int slotId, String itemName, List<EnchantEntry> enchantments) {
             this.slotId = slotId;
             this.itemName = itemName;
-            this.enchantments = enchantments != null ? enchantments : Collections.emptyList();
+            this.enchantments = enchantments != null
+                    ? Collections.unmodifiableList(new ArrayList<>(enchantments))
+                    : Collections.emptyList();
         }
     }
 }

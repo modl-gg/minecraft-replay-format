@@ -2,10 +2,18 @@ package gg.modl.minecraft.replay;
 
 import gg.modl.minecraft.replay.format.ReplayEvent;
 import gg.modl.minecraft.replay.format.ReplayHeader;
-import gg.modl.minecraft.replay.format.events.*;
+import gg.modl.minecraft.replay.format.events.BlockChangeEvent;
+import gg.modl.minecraft.replay.format.events.ChatEvent;
+import gg.modl.minecraft.replay.format.events.EntityMoveEvent;
+import gg.modl.minecraft.replay.format.events.EntityRemoveEvent;
+import gg.modl.minecraft.replay.format.events.EntitySpawnEvent;
+import gg.modl.minecraft.replay.format.events.PlayerAnimEvent;
+import gg.modl.minecraft.replay.format.events.PlayerMoveEvent;
+import gg.modl.minecraft.replay.format.events.PlayerRemoveEvent;
+import gg.modl.minecraft.replay.format.events.PlayerSpawnEvent;
 import gg.modl.minecraft.replay.util.BlockSnapshot;
-
 import gg.modl.minecraft.replay.util.FormatConstants;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -13,7 +21,11 @@ import java.io.InputStream;
 import java.util.List;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GoldenFileTest {
 

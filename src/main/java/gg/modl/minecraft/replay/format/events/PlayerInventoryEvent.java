@@ -7,6 +7,7 @@ import lombok.ToString;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -23,7 +24,7 @@ public class PlayerInventoryEvent extends ReplayEvent {
         super(timestampDeltaMs);
         this.uuid = uuid;
         this.fullSnapshot = fullSnapshot;
-        this.slots = slots;
+        this.slots = slots != null ? Collections.unmodifiableList(new ArrayList<>(slots)) : Collections.emptyList();
     }
 
     @Override public EventType getType() { return EventType.PLAYER_INVENTORY; }
@@ -96,7 +97,9 @@ public class PlayerInventoryEvent extends ReplayEvent {
             this.slotIndex = slotIndex;
             this.itemName = itemName;
             this.count = count;
-            this.enchantments = enchantments != null ? enchantments : Collections.emptyList();
+            this.enchantments = enchantments != null
+                    ? Collections.unmodifiableList(new ArrayList<>(enchantments))
+                    : Collections.emptyList();
         }
     }
 }

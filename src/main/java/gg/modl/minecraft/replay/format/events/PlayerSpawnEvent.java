@@ -27,7 +27,11 @@ public class PlayerSpawnEvent extends ReplayEvent {
         this.z = z;
         this.yaw = yaw;
         this.pitch = pitch;
-        this.equipment = equipment != null ? equipment : new byte[0];
+        this.equipment = equipment != null ? equipment.clone() : new byte[0];
+    }
+
+    public byte[] getEquipment() {
+        return equipment.clone();
     }
 
     @Override public EventType getType() { return EventType.PLAYER_SPAWN; }

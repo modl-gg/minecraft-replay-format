@@ -17,7 +17,11 @@ public class PlayerSkinEvent extends ReplayEvent {
     public PlayerSkinEvent(int timestampDeltaMs, UUID uuid, byte[] skinPng) {
         super(timestampDeltaMs);
         this.uuid = uuid;
-        this.skinPng = skinPng != null ? skinPng : new byte[0];
+        this.skinPng = skinPng != null ? skinPng.clone() : new byte[0];
+    }
+
+    public byte[] getSkinPng() {
+        return skinPng.clone();
     }
 
     @Override

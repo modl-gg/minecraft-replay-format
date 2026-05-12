@@ -22,7 +22,11 @@ public class EntitySpawnEvent extends ReplayEvent {
         this.x = x;
         this.y = y;
         this.z = z;
-        this.metadata = metadata != null ? metadata : new byte[0];
+        this.metadata = metadata != null ? metadata.clone() : new byte[0];
+    }
+
+    public byte[] getMetadata() {
+        return metadata.clone();
     }
 
     @Override public EventType getType() { return EventType.ENTITY_SPAWN; }

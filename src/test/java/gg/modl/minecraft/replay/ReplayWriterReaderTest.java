@@ -2,16 +2,43 @@ package gg.modl.minecraft.replay;
 
 import gg.modl.minecraft.replay.format.ReplayEvent;
 import gg.modl.minecraft.replay.format.ReplayHeader;
-import gg.modl.minecraft.replay.format.events.*;
+import gg.modl.minecraft.replay.format.events.BlockChangeEvent;
+import gg.modl.minecraft.replay.format.events.ChatEvent;
+import gg.modl.minecraft.replay.format.events.EntityMoveEvent;
+import gg.modl.minecraft.replay.format.events.EntityRemoveEvent;
+import gg.modl.minecraft.replay.format.events.EntitySpawnEvent;
+import gg.modl.minecraft.replay.format.events.PlayerAnimEvent;
+import gg.modl.minecraft.replay.format.events.PlayerBlockBreakEvent;
+import gg.modl.minecraft.replay.format.events.PlayerBlockPlaceEvent;
+import gg.modl.minecraft.replay.format.events.PlayerEffectsEvent;
+import gg.modl.minecraft.replay.format.events.PlayerEquipmentFullEvent;
+import gg.modl.minecraft.replay.format.events.PlayerInventoryEvent;
+import gg.modl.minecraft.replay.format.events.PlayerMoveEvent;
+import gg.modl.minecraft.replay.format.events.PlayerRemoveEvent;
+import gg.modl.minecraft.replay.format.events.PlayerSkinEvent;
+import gg.modl.minecraft.replay.format.events.PlayerSpawnEvent;
 import gg.modl.minecraft.replay.util.BlockSnapshot;
 import gg.modl.minecraft.replay.util.FormatConstants;
 
 import org.junit.jupiter.api.Test;
 
-import java.io.*;
-import java.util.*;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReplayWriterReaderTest {
 
@@ -475,20 +502,186 @@ class ReplayWriterReaderTest {
         assertInstanceOf(BlockChangeEvent.class, first);
         assertEquals(500, first.getTimestampDeltaMs());
 
-        // Second event: unknown 0x20 — should be skipped (return null)
+        // Second visible event: unknown 0x20 should be skipped transparently.
         ReplayEvent second = reader.readEvent();
-        assertNull(second, "Unknown event type should be skipped and return null");
-
-        // Third event: BlockChange
-        ReplayEvent third = reader.readEvent();
-        assertNotNull(third);
-        assertInstanceOf(BlockChangeEvent.class, third);
-        assertEquals(1500, third.getTimestampDeltaMs());
-        assertEquals(30, ((BlockChangeEvent) third).getX());
+        assertNotNull(second);
+        assertInstanceOf(BlockChangeEvent.class, second);
+        assertEquals(1500, second.getTimestampDeltaMs());
+        assertEquals(30, ((BlockChangeEvent) second).getX());
 
         // EOF
         assertNull(reader.readEvent());
         reader.close();
+    }
+
+    @Test
+    void tlvKnownEventWithAppendedPayloadDoesNotMisalignNextEvent() throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(baos);
+        writeHeaderAndEmptySnapshot(out, 4);
+        out.writeByte(0x01); // BLOCK_CHANGE
+        out.writeInt(500);
+        out.writeShort(18); // 14 current bytes + 4 future extension bytes
+        out.writeInt(10);
+        out.writeShort(64);
+        out.writeInt(20);
+        out.writeInt(1);
+        out.writeInt(999); // future extension field
+        out.writeByte(0x01); // BLOCK_CHANGE
+        out.writeInt(1500);
+        out.writeShort(14);
+        out.writeInt(30);
+        out.writeShort(65);
+        out.writeInt(40);
+        out.writeInt(2);
+        out.close();
+
+        ReplayReader reader = new ReplayReader(new ByteArrayInputStream(baos.toByteArray()));
+        reader.readHeader();
+        reader.readSnapshot();
+
+        ReplayEvent first = reader.readEvent();
+        ReplayEvent second = reader.readEvent();
+
+        assertInstanceOf(BlockChangeEvent.class, first);
+        assertEquals(10, ((BlockChangeEvent) first).getX());
+        assertInstanceOf(BlockChangeEvent.class, second);
+        assertEquals(30, ((BlockChangeEvent) second).getX());
+        assertNull(reader.readEvent());
+        reader.close();
+    }
+
+    @Test
+    void tlvPlayerSkinRejectsNegativeNestedSkinLength() throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(baos);
+        writeHeaderAndEmptySnapshot(out, 4);
+        out.writeByte(0x0F); // PLAYER_SKIN
+        out.writeInt(1000);
+        out.writeShort(20);
+        out.writeLong(TEST_UUID.getMostSignificantBits());
+        out.writeLong(TEST_UUID.getLeastSignificantBits());
+        out.writeInt(-1);
+        out.close();
+
+        ReplayReader reader = new ReplayReader(new ByteArrayInputStream(baos.toByteArray()));
+        reader.readHeader();
+        reader.readSnapshot();
+
+        assertThrows(IOException.class, reader::readEvent);
+        reader.close();
+    }
+
+    @Test
+    void tlvPlayerSkinRejectsNestedSkinLengthBeyondPayload() throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(baos);
+        writeHeaderAndEmptySnapshot(out, 4);
+        out.writeByte(0x0F); // PLAYER_SKIN
+        out.writeInt(1000);
+        out.writeShort(20);
+        out.writeLong(TEST_UUID.getMostSignificantBits());
+        out.writeLong(TEST_UUID.getLeastSignificantBits());
+        out.writeInt(8);
+        out.close();
+
+        ReplayReader reader = new ReplayReader(new ByteArrayInputStream(baos.toByteArray()));
+        reader.readHeader();
+        reader.readSnapshot();
+
+        assertThrows(IOException.class, reader::readEvent);
+        reader.close();
+    }
+
+    @Test
+    void tlvSkipUnknownEventTypeThrowsWhenPayloadIsTruncated() throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(baos);
+        writeHeaderAndEmptySnapshot(out, 4);
+        out.writeByte(0x20);
+        out.writeInt(1000);
+        out.writeShort(8);
+        out.write(new byte[]{1, 2, 3, 4});
+        out.close();
+
+        ReplayReader reader = new ReplayReader(new ByteArrayInputStream(baos.toByteArray()));
+        reader.readHeader();
+        reader.readSnapshot();
+
+        assertThrows(IOException.class, reader::readEvent);
+        reader.close();
+    }
+
+    @Test
+    void writerRejectsPayloadLargerThanUnsignedShort() throws IOException {
+        ReplayWriter writer = new ReplayWriter(new ByteArrayOutputStream());
+        PlayerSkinEvent oversized = new PlayerSkinEvent(100, TEST_UUID, new byte[65516]);
+
+        assertThrows(IOException.class, () -> writer.writeEvent(oversized));
+        writer.close();
+    }
+
+    @Test
+    void mutableByteArrayInputsAreCopied() {
+        byte[] metadata = {1, 2, 3};
+        EntitySpawnEvent entitySpawn = new EntitySpawnEvent(100, 1, (short) 2, 3.0f, 4.0f, 5.0f, metadata);
+        metadata[0] = 9;
+
+        assertArrayEquals(new byte[]{1, 2, 3}, entitySpawn.getMetadata());
+        byte[] returnedMetadata = entitySpawn.getMetadata();
+        returnedMetadata[1] = 9;
+        assertArrayEquals(new byte[]{1, 2, 3}, entitySpawn.getMetadata());
+
+        byte[] equipment = {4, 5, 6};
+        PlayerSpawnEvent playerSpawn = new PlayerSpawnEvent(100, TEST_UUID, "Tester", 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, equipment);
+        equipment[0] = 9;
+
+        assertArrayEquals(new byte[]{4, 5, 6}, playerSpawn.getEquipment());
+        byte[] returnedEquipment = playerSpawn.getEquipment();
+        returnedEquipment[1] = 9;
+        assertArrayEquals(new byte[]{4, 5, 6}, playerSpawn.getEquipment());
+
+        byte[] skin = {7, 8, 9};
+        PlayerSkinEvent skinEvent = new PlayerSkinEvent(100, TEST_UUID, skin);
+        skin[0] = 1;
+
+        assertArrayEquals(new byte[]{7, 8, 9}, skinEvent.getSkinPng());
+        byte[] returnedSkin = skinEvent.getSkinPng();
+        returnedSkin[1] = 1;
+        assertArrayEquals(new byte[]{7, 8, 9}, skinEvent.getSkinPng());
+    }
+
+    @Test
+    void mutableListInputsAreCopiedAndUnmodifiable() {
+        List<PlayerInventoryEvent.EnchantEntry> enchantments = new ArrayList<>();
+        enchantments.add(new PlayerInventoryEvent.EnchantEntry("minecraft:sharpness", 1));
+        PlayerInventoryEvent.SlotEntry slot = new PlayerInventoryEvent.SlotEntry(0, "diamond_sword", 1, enchantments);
+        enchantments.clear();
+
+        assertEquals(1, slot.getEnchantments().size());
+        assertThrows(UnsupportedOperationException.class, () -> slot.getEnchantments().add(
+                new PlayerInventoryEvent.EnchantEntry("minecraft:unbreaking", 1)));
+
+        List<PlayerInventoryEvent.SlotEntry> slots = new ArrayList<>();
+        slots.add(slot);
+        PlayerInventoryEvent inventory = new PlayerInventoryEvent(100, TEST_UUID, true, slots);
+        slots.clear();
+
+        assertEquals(1, inventory.getSlots().size());
+        assertThrows(UnsupportedOperationException.class, () -> inventory.getSlots().add(
+                new PlayerInventoryEvent.SlotEntry(1, "stone", 1)));
+
+        List<int[]> effects = new ArrayList<>();
+        int[] effect = {1, 2, 3};
+        effects.add(effect);
+        PlayerEffectsEvent effectsEvent = PlayerEffectsEvent.fromList(100, TEST_UUID, effects);
+        effect[0] = 9;
+        effects.clear();
+
+        assertEquals(1, effectsEvent.getEffects().size());
+        assertEquals(1, effectsEvent.getEffects().get(0).getEffectTypeId());
+        assertThrows(UnsupportedOperationException.class, () -> effectsEvent.getEffects().add(
+                new PlayerEffectsEvent.EffectEntry(2, 3, 4)));
     }
 
     // ── Edge value tests ───────────────────────────────────────────────
@@ -689,6 +882,20 @@ class ReplayWriterReaderTest {
                 .targetZ(0)
                 .radiusBlocks(64)
                 .build();
+    }
+
+    private void writeHeaderAndEmptySnapshot(DataOutputStream out, int version) throws IOException {
+        out.write(FormatConstants.MAGIC);
+        out.writeShort(version);
+        out.writeLong(1700000000000L);
+        byte[] mcVersion = "1.21.4".getBytes();
+        out.writeShort(mcVersion.length);
+        out.write(mcVersion);
+        out.writeInt(0);
+        out.writeInt(64);
+        out.writeInt(0);
+        out.writeInt(64);
+        out.writeInt(0);
     }
 
     private ReplayEvent roundTripEvent(ReplayEvent event) throws IOException {

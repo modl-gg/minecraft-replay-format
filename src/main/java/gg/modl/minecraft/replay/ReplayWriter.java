@@ -5,11 +5,17 @@ import gg.modl.minecraft.replay.format.ReplayHeader;
 import gg.modl.minecraft.replay.util.BlockSnapshot;
 import gg.modl.minecraft.replay.util.FormatConstants;
 
-import java.io.*;
+import java.io.BufferedOutputStream;
+import java.io.Closeable;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 public class ReplayWriter implements Closeable {
+
+    private static final int MAX_UNSIGNED_SHORT = 0xFFFF;
 
     private final DataOutputStream out;
 
@@ -41,16 +47,18 @@ public class ReplayWriter implements Closeable {
     }
 
     public void writeEvent(ReplayEvent event) throws IOException {
+        int payloadSize = checkedPayloadSize(event);
         out.writeByte(event.getType().getId());
         out.writeInt(event.getTimestampDeltaMs());
-        out.writeShort(event.payloadSize());
+        out.writeShort(payloadSize);
         event.writePayload(out);
     }
 
     public void writeEvent(ReplayEvent event, long timestampOffset) throws IOException {
+        int payloadSize = checkedPayloadSize(event);
         out.writeByte(event.getType().getId());
         out.writeInt((int) Math.max(0, event.getTimestampDeltaMs() - timestampOffset));
-        out.writeShort(event.payloadSize());
+        out.writeShort(payloadSize);
         event.writePayload(out);
     }
 
@@ -61,5 +69,13 @@ public class ReplayWriter implements Closeable {
     @Override
     public void close() throws IOException {
         out.close();
+    }
+
+    private int checkedPayloadSize(ReplayEvent event) throws IOException {
+        int payloadSize = event.payloadSize();
+        if (payloadSize < 0 || payloadSize > MAX_UNSIGNED_SHORT) {
+            throw new IOException("Replay event payload too large for TLV length: " + payloadSize);
+        }
+        return payloadSize;
     }
 }
